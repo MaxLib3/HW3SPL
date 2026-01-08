@@ -16,8 +16,8 @@ public class StompMessagingProtocolImpl<T> implements StompMessagingProtocol<Str
     private Connections<String> connections;
     private static Map<String, String> users = new ConcurrentHashMap<>(); //username to password 
     private static Map<Integer, String> connectionIdToUser = new ConcurrentHashMap<>(); // connectionId to username
-    private Map<String, Integer> SubscriptiontoChannelname =  new ConcurrentHashMap<>(); // Subscription id to channel name
-    private int messageId = 0;
+    private static Map<String, Integer> SubscriptiontoChannelname =  new ConcurrentHashMap<>(); // Subscription id to channel name
+    private static int messageId = 0;
 
     @Override
     public void start(int connectionId, Connections<String> connections) {
@@ -161,7 +161,7 @@ public class StompMessagingProtocolImpl<T> implements StompMessagingProtocol<Str
                             "destination:" + destination + "\n\n" +
                             content + "\n" +
                             "\u0000";
-            connections.send(subId, message);
+            connections.send(this.connectionId, message);
         }
         this.messageId += 1;
 
