@@ -1,21 +1,24 @@
 package bgu.spl.net.srv;
 
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 public class ConnectionsImpl<T> implements Connections<T> {
+
+    // Map: ConnectionID -> ConnectionHandler
+    private final ConcurrentHashMap<Integer, ConnectionHandler<T>> activeConnections;
     
-    private final ConcurrentHashMap<Integer, ConnectionHandler<T>> connections;
-    private final ConcurrentHashMap<String, CopyOnWriteArrayList<Integer>> channels;
+    // Map: ChannelName -> (ConnectionID -> SubscriptionID)
+    // We need this nested map so we know which subscription ID to use for each specific user.
+    private final ConcurrentHashMap<String, ConcurrentHashMap<Integer, String>> channels;
 
     public ConnectionsImpl() {
-        this.connections = new ConcurrentHashMap<>();
+        this.activeConnections = new ConcurrentHashMap<>();
         this.channels = new ConcurrentHashMap<>();
     }
 
     @Override
     public boolean send(int connectionId, T msg) {
-        ConnectionHandler<T> handler = connections.get(connectionId);
+        ConnectionHandler<T> handler = activeConnections.get(connectionId);
         if (handler != null) {
             handler.send(msg);
             return true;
@@ -25,35 +28,39 @@ public class ConnectionsImpl<T> implements Connections<T> {
 
     @Override
     public void send(String channel, T msg) {
-        CopyOnWriteArrayList<Integer> subscribers = channels.get(channel);
+        ConcurrentHashMap<Integer, String> subscribers = channels.get(channel);
         if (subscribers != null) {
-            for (Integer connectionId : subscribers) {
-                send(connectionId, msg);
+            for (Integer connectionId : subscribers.keySet()) 
+            {
+                String subscriptionId = subscribers.get(connectionId);
+                String frame = (String) msg;
+                String personalizedFrame = frame.replaceFirst("MESSAGE\n", "MESSAGE\nsubscription:" + subscriptionId + "\n");           
+                send(connectionId, (T)personalizedFrame);
             }
         }
     }
 
     @Override
     public void disconnect(int connectionId) {
-        connections.remove(connectionId);
-        for (CopyOnWriteArrayList<Integer> subscribers : channels.values()) {
-            subscribers.remove(Integer.valueOf(connectionId));
+        activeConnections.remove(connectionId);
+        for (ConcurrentHashMap<Integer, String> subscribers : channels.values()) {
+            subscribers.remove(connectionId);
         }
     }
 
     public void connect(int connectionId, ConnectionHandler<T> handler) {
-        connections.put(connectionId, handler);
+        activeConnections.put(connectionId, handler);
     }
 
-    public void subscribe(String channel, int connectionId) {
-        channels.computeIfAbsent(channel, k -> new CopyOnWriteArrayList<>()).add(connectionId);
+    public void subscribe(String channel, int connectionId, String subscriptionId) {
+        channels.computeIfAbsent(channel, k -> new ConcurrentHashMap<>())
+                .put(connectionId, subscriptionId);
     }
 
     public void unsubscribe(String channel, int connectionId) {
-        CopyOnWriteArrayList<Integer> subscribers = channels.get(channel);
+        ConcurrentHashMap<Integer, String> subscribers = channels.get(channel);
         if (subscribers != null) {
-            subscribers.remove(Integer.valueOf(connectionId));
+            subscribers.remove(connectionId);
         }
     }
-    
 }

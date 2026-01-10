@@ -1,54 +1,58 @@
 package bgu.spl.net.impl.stomp;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import bgu.spl.net.api.StompMessagingProtocol;
 import bgu.spl.net.srv.Connections;
+import bgu.spl.net.srv.ConnectionsImpl;
+
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class StompMessagingProtocolImpl<T> implements StompMessagingProtocol<String> {
+public class StompMessagingProtocolImpl implements StompMessagingProtocol<String> {
 
-    private boolean shouldTerminate = false;
     private int connectionId;
-    private Connections<String> connections;
-    private static Map<String, String> users = new ConcurrentHashMap<>();
-    private static Map<Integer, String> connectionIdToUser = new ConcurrentHashMap<>();
-    private static Map<String, Map<Integer, Integer>> ChannelnametoSubscriptionID = new ConcurrentHashMap<>();
-    private Map<Integer, String> mySubscriptions = new ConcurrentHashMap<>();
-    
-    private static AtomicInteger messageId = new AtomicInteger(0);
+    private ConnectionsImpl<String> connections;
+    private boolean shouldTerminate = false;
+    private String user; // The specific user for this connection instance
+    private ConcurrentHashMap<String, String> subscriptionIdToChannel = new ConcurrentHashMap<>();
+
+    // Static shared data structures for all protocol instances
+    private static final ConcurrentHashMap<String, String> LoggedIn = new ConcurrentHashMap<>(); 
+    private static final ConcurrentHashMap<String, Integer> ConnectedClients = new ConcurrentHashMap<>();
+    private static final AtomicInteger msgId = new AtomicInteger(0);
 
     @Override
     public void start(int connectionId, Connections<String> connections) {
         this.connectionId = connectionId;
-        this.connections = connections;        
+        this.connections = (ConnectionsImpl<String>)connections;
     }
 
     @Override
     public void process(String message) {
-        int i = message.indexOf("\n");
-        String command = message.substring(0, i);
-        String body = message.substring(i+1);
+        String[] lines = message.split("\n");
+        if (lines.length == 0) return;
+
+        String command = lines[0].trim();
         switch (command) {
             case "CONNECT":
-                this.connect(body);
-                break;
-            case "SEND":
-                this.send(body);
+                handleConnect(message);
                 break;
             case "SUBSCRIBE":
-                this.subscribe(body);
+                handleSubscribe(message);
                 break;
             case "UNSUBSCRIBE":
-                this.unsubscribe(body);
+                handleUnsubscribe(message);
+                break;
+            case "SEND":
+                handleSend(message);
                 break;
             case "DISCONNECT":
-                this.disconnect(body);
+                handleDisconnect(message);
                 break;
             default:
-                throw new IllegalArgumentException("Unexpected value: " + command);
+                sendError("Unknown command", "The command " + command + " is not recognized", null);
+                break;
         }
     }
 
@@ -57,191 +61,150 @@ public class StompMessagingProtocolImpl<T> implements StompMessagingProtocol<Str
         return shouldTerminate;
     }
 
-    private void connect (String body) {
-        Pattern header = Pattern.compile("accept-version:(.*)\n");
-        Pattern header1 = Pattern.compile("host:(.*)\n");
-        Pattern header2 = Pattern.compile("passcode:(.*)\n");
-        Pattern header3 = Pattern.compile("login:(.*)\n");
-        Pattern header4 = Pattern.compile("receipt-id:(.*)\n");
-        Matcher matcher = header.matcher(body);
-        Matcher matcher1 = header1.matcher(body);
-        Matcher matcher2 = header2.matcher(body);
-        Matcher matcher3 = header3.matcher(body);
-        if (!matcher.find()) {
-            this.error("Missing accept-version header");
+    private void handleConnect(String message) {
+        String version = extractHeader(message, "accept-version");
+        String host = extractHeader(message, "host");
+        String login = extractHeader(message, "login");
+        String passcode = extractHeader(message, "passcode");
+        String receipt = extractHeader(message, "receipt");
+        if (version == null || host == null || login == null || passcode == null) {
+            sendError("Malformed Frame", "Missing headers", receipt);
             return;
         }
-        if (!matcher1.find()) {
-            this.error("Missing host header");
-            return;
-        }
-        if(!matcher2.find()) {
-            this.error("Missing passcode header");
-            return;
-        }
-        if(!matcher3.find()) {
-            this.error("Missing login header");
-            return;
-        }
-        String version = matcher.group(1).trim();
-        String host = matcher1.group(1).trim();
         if (!version.equals("1.2")) {
-            this.error("Unsupported version");
+            sendError("Malformed Frame", "Invalid version: " + version, receipt);
             return;
         }
-        if(!host.equals("stomp.cs.bgu.ac.il")) {
-            this.error("Wrong host");
+        if (!host.equals("stomp.cs.bgu.ac.il")) {
+            sendError("Malformed Frame", "Invalid host: " + host, receipt);
             return;
         }
-        String username = matcher3.group(1).trim();
-        String passcode = matcher2.group(1).trim();
-        if (users.containsKey(username)) {
-            if (!users.get(username).equals(passcode)) {
-                this.error("Wrong password");
+
+        synchronized (ConnectedClients) {
+            if (ConnectedClients.containsKey(login)) {
+                sendError("User already logged in", "User " + login + " is already active", receipt);
                 return;
             }
-            if (connectionIdToUser.containsValue(username)) {
-                this.error("User already logged in");
-                return;
+
+            if (LoggedIn.containsKey(login)) {
+                if (!LoggedIn.get(login).equals(passcode)) {
+                    sendError("Wrong password", "Password does not match", receipt);
+                    return;
+                }
+            } else {
+                LoggedIn.put(login, passcode);
             }
-        } else {
-            users.put(username, passcode);
+            ConnectedClients.put(login, connectionId);
+            this.user = login;
         }
-        connectionIdToUser.put(this.connectionId, username);
-        String response = "CONNECTED\n" + "version:1.2\n\n" + "\u0000";
-        connections.send(this.connectionId, response);
-        Matcher matcher4 = header4.matcher(body);
-        if (matcher4.find()) {
-            String receiptId = matcher4.group(1).trim();
-            String receiptResponse = "RECEIPT\n" + "receipt-id:" + receiptId + "\n\n" + "\u0000";
-            connections.send(this.connectionId, receiptResponse);
+        sendFrame("CONNECTED\n" + "version:1.2\n");
+        if (receipt != null) {
+            sendFrame("RECEIPT\n" + "receipt-id:" + receipt + "\n");
         }
     }
 
-    private void send (String body) {
-        Pattern header = Pattern.compile("destination:(.*)\n\n(.*)\n", Pattern.DOTALL);
-        Pattern header1 = Pattern.compile("destination:(.*)\nreceipt-id:.*\n\n(.*)\n", Pattern.DOTALL);
-        Pattern header4 = Pattern.compile("receipt-id:(.*)\n");
-        Matcher matcher = header.matcher(body);
-        Matcher matcher1 = header1.matcher(body);
-        if (!matcher.find() && !matcher1.find()) {
-            this.error("Missing destination header");
+    private void handleSubscribe(String message) {
+        String dest = extractHeader(message, "destination");
+        String id = extractHeader(message, "id");
+        String receipt = extractHeader(message, "receipt");
+        if (dest == null || id == null) {
+            sendError("Malformed Frame", "Missing destination or id", receipt);
             return;
         }
-        String destination;
-        String content;
-        if (matcher1.find()) {
-            destination = matcher1.group(1).trim();
-            content = matcher1.group(2).trim();
-        } else {
-            destination = matcher.group(1).trim();
-            content = matcher.group(2).trim();
-        }
 
-        Map<Integer, Integer> subscribers = ChannelnametoSubscriptionID.get(destination);
-        if (subscribers != null) {
-            int msgId = messageId.getAndIncrement();
-            for (Map.Entry<Integer, Integer> entry : subscribers.entrySet()) {
-                int targetConnId = entry.getKey();
-                int targetSubId = entry.getValue();
-                String message = "MESSAGE\n" + 
-                                "subscription:" + targetSubId + "\n" + 
-                                "message-id:" + msgId + "\n" + 
-                                "destination:" + destination + "\n\n" + 
-                                content + "\n" + "\u0000";
-                connections.send(targetConnId, message);
-            }
-        }
-
-        Matcher matcher4 = header4.matcher(body);
-        if (matcher4.find()) {
-            String receiptId = matcher4.group(1).trim();
-            String receiptResponse = "RECEIPT\n" + "receipt-id:" + receiptId + "\n\n" + "\u0000";
-            connections.send(this.connectionId, receiptResponse);
+        subscriptionIdToChannel.put(id, dest);
+        connections.subscribe(dest, connectionId, id);
+        if (receipt != null) {
+            sendFrame("RECEIPT\n" + "receipt-id:" + receipt + "\n");
         }
     }
 
-    private void subscribe (String body) {
-        Pattern header = Pattern.compile("destination:(.*)\n");
-        Pattern header1 = Pattern.compile("id:(.*)\n");
-        Pattern header4 = Pattern.compile("receipt-id:(.*)\n");
-        Matcher matcher = header.matcher(body);
-        if (!matcher.find()) {
-            this.error("Missing destination header");
-            return;
-        }
-        Matcher matcher1 = header1.matcher(body);
-        if (!matcher1.find()) {
-            this.error("Missing id header");
-            return;
-        }
-        String destination = matcher.group(1).trim();
-        int subId = Integer.parseInt(matcher1.group(1).trim());
-
-        if (mySubscriptions.containsKey(subId)) {
-            this.error("Subscription id already in use for this client");
+    private void handleUnsubscribe(String message) {
+        String subId = extractHeader(message, "id");
+        String receipt = extractHeader(message, "receipt");
+        if (subId == null) {
+            sendError("Malformed Frame", "Missing id", receipt);
             return;
         }
 
-        mySubscriptions.put(subId, destination);
-        ChannelnametoSubscriptionID.computeIfAbsent(destination, k -> new ConcurrentHashMap<>()).put(this.connectionId, subId);
+        String channel = subscriptionIdToChannel.remove(subId);
+        if (channel != null) {
+            connections.unsubscribe(channel, connectionId);
+        }
 
-        Matcher matcher4 = header4.matcher(body);
-        if (matcher4.find()) {
-            String receiptId = matcher4.group(1).trim();
-            String receiptResponse = "RECEIPT\n" + "receipt-id:" + receiptId + "\n\n" + "\u0000";
-            connections.send(this.connectionId, receiptResponse);
+        if (receipt != null) {
+            sendFrame("RECEIPT\n" + "receipt-id:" + receipt + "\n");
         }
     }
 
-    private void unsubscribe (String body) {
-        Pattern header1 = Pattern.compile("id:(.*)\n");
-        Pattern header4 = Pattern.compile("receipt-id:(.*)\n");
-        Matcher matcher1 = header1.matcher(body);
-        if (!matcher1.find()) {
-            this.error("Missing id header");
+    private void handleSend(String message) {
+        String dest = extractHeader(message, "destination");
+        String receipt = extractHeader(message, "receipt");
+        if (dest == null) {
+            sendError("Malformed Frame", "Missing destination", receipt);
             return;
         }
-        int subId = Integer.parseInt(matcher1.group(1).trim());
-        String destination = mySubscriptions.remove(subId);
-        if (destination != null) {
-            Map<Integer, Integer> subscribers = ChannelnametoSubscriptionID.get(destination);
-            if (subscribers != null) {
-                subscribers.remove(this.connectionId);
-            }
+
+        // User has to be subscribed to send messages to the topic
+        if (!subscriptionIdToChannel.containsValue(dest)) {
+            sendError("Access Denied", "User not subscribed to topic", receipt);
+            return;
         }
 
-        Matcher matcher4 = header4.matcher(body);
-        if (matcher4.find()) {
-            String receiptId = matcher4.group(1).trim();
-            String receiptResponse = "RECEIPT\n" + "receipt-id:" + receiptId + "\n\n" + "\u0000";
-            connections.send(this.connectionId, receiptResponse);
+        // Get message body
+        String body = "";
+        int bodyIdx = message.indexOf("\n\n");
+        if (bodyIdx != -1) {
+            body = message.substring(bodyIdx + 2);
+        }
+        String msgFrame = "MESSAGE\n" +
+                          "destination:" + dest + "\n" +
+                          "message-id:" + msgId.incrementAndGet() + "\n" +
+                          "\n" +
+                          body;
+        connections.send(dest, msgFrame);
+
+        if (receipt != null) {
+            sendFrame("RECEIPT\n" + "receipt-id:" + receipt + "\n");
         }
     }
 
-    private void disconnect (String body) {
-        Pattern header4 = Pattern.compile("receipt-id:(.*)\n");
-        Matcher matcher4 = header4.matcher(body);
-        if (matcher4.find()) {
-            String receiptId = matcher4.group(1).trim();
-            String receiptResponse = "RECEIPT\n" + "receipt-id:" + receiptId + "\n\n" + "\u0000";
-            connections.send(this.connectionId, receiptResponse);
+    private void handleDisconnect(String message) {
+        String receipt = extractHeader(message, "receipt");
+        if (user != null) {
+            ConnectedClients.remove(user);
         }
 
-        for (String dest : mySubscriptions.values()) {
-            Map<Integer, Integer> subs = ChannelnametoSubscriptionID.get(dest);
-            if (subs != null) {
-                subs.remove(this.connectionId);
-            }
+        if (receipt != null) {
+            sendFrame("RECEIPT\n" + "receipt-id:" + receipt + "\n");
         }
+        connections.disconnect(connectionId);
+        shouldTerminate = true;
+    }
+
+    private String extractHeader(String msg, String key) {
+        Pattern pattern = Pattern.compile(key + ":\\s*(.*)");
+        Matcher matcher = pattern.matcher(msg);
+        if (matcher.find()) {
+            return matcher.group(1).trim();
+        }
+        return null;
+    }
+
+    private void sendFrame(String frameBody) {
+        connections.send(connectionId, frameBody + "\n\u0000"); 
+    }
+
+    private void sendError(String message, String description, String receiptId) {
+        String frame = "ERROR\n" +
+                       (receiptId != null ? "receipt-id:" + receiptId + "\n" : "") +
+                       "message:" + message + "\n" +
+                       "\n" +
+                       (description != null ? description : "") + "\n";
         
-        connectionIdToUser.remove(this.connectionId);
-        this.shouldTerminate = true;
-    }
-
-    private void error (String errorMessage) {
-        String response = "ERROR\n" + "message:" + errorMessage + "\n\n" + "\u0000";
-        connections.send(this.connectionId, response);
-        this.shouldTerminate = true;
+        sendFrame(frame);
+        connections.disconnect(connectionId);
+        if (user != null) ConnectedClients.remove(user);
+        shouldTerminate = true;
     }
 }
