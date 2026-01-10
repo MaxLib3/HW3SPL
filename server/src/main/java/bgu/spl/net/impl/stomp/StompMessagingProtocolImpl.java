@@ -1,34 +1,33 @@
 package bgu.spl.net.impl.stomp;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-
+import java.util.concurrent.atomic.AtomicInteger;
 import bgu.spl.net.api.StompMessagingProtocol;
 import bgu.spl.net.srv.Connections;
-
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.ArrayList;
 
 public class StompMessagingProtocolImpl<T> implements StompMessagingProtocol<String> {
 
     private boolean shouldTerminate = false;
     private int connectionId;
     private Connections<String> connections;
-    private static Map<String, String> users = new ConcurrentHashMap<>(); //username to password 
-    private static Map<Integer, String> connectionIdToUser = new ConcurrentHashMap<>(); // connectionId to username
-    private static Map<String, Integer> SubscriptiontoChannelname =  new ConcurrentHashMap<>(); // Subscription id to channel name
-    private static int messageId = 0;
+    private static Map<String, String> users = new ConcurrentHashMap<>();
+    private static Map<Integer, String> connectionIdToUser = new ConcurrentHashMap<>();
+    private static Map<String, Map<Integer, Integer>> ChannelnametoSubscriptionID = new ConcurrentHashMap<>();
+    private Map<Integer, String> mySubscriptions = new ConcurrentHashMap<>();
+    
+    private static AtomicInteger messageId = new AtomicInteger(0);
 
     @Override
     public void start(int connectionId, Connections<String> connections) {
-        // TODO Auto-generated method stub
         this.connectionId = connectionId;
         this.connections = connections;        
     }
 
     @Override
     public void process(String message) {
-        // TODO Auto-generated method stub     
         int i = message.indexOf("\n");
         String command = message.substring(0, i);
         String body = message.substring(i+1);
@@ -49,15 +48,12 @@ public class StompMessagingProtocolImpl<T> implements StompMessagingProtocol<Str
                 this.disconnect(body);
                 break;
             default:
-                //need to send an error to the client
                 throw new IllegalArgumentException("Unexpected value: " + command);
         }
-
     }
 
     @Override
     public boolean shouldTerminate() {
-        // TODO Auto-generated method stub
         return shouldTerminate;
     }
 
@@ -87,8 +83,8 @@ public class StompMessagingProtocolImpl<T> implements StompMessagingProtocol<Str
             this.error("Missing login header");
             return;
         }
-        String version = matcher.group(1);
-        String host = matcher1.group(1);
+        String version = matcher.group(1).trim();
+        String host = matcher1.group(1).trim();
         if (!version.equals("1.2")) {
             this.error("Unsupported version");
             return;
@@ -97,8 +93,8 @@ public class StompMessagingProtocolImpl<T> implements StompMessagingProtocol<Str
             this.error("Wrong host");
             return;
         }
-        String username = matcher3.group(1);
-        String passcode = matcher2.group(1);
+        String username = matcher3.group(1).trim();
+        String passcode = matcher2.group(1).trim();
         if (users.containsKey(username)) {
             if (!users.get(username).equals(passcode)) {
                 this.error("Wrong password");
@@ -112,27 +108,20 @@ public class StompMessagingProtocolImpl<T> implements StompMessagingProtocol<Str
             users.put(username, passcode);
         }
         connectionIdToUser.put(this.connectionId, username);
-
-        String response = "CONNECTED\n" +
-                          "version:1.2\n\n" +
-                          "\u0000";
+        String response = "CONNECTED\n" + "version:1.2\n\n" + "\u0000";
         connections.send(this.connectionId, response);
-
         Matcher matcher4 = header4.matcher(body);
         if (matcher4.find()) {
-            String receiptId = matcher4.group(1);
-            String receiptResponse = "RECEIPT\n" +
-                                     "receipt-id:" + receiptId + "\n\n" +
-                                     "\u0000";
+            String receiptId = matcher4.group(1).trim();
+            String receiptResponse = "RECEIPT\n" + "receipt-id:" + receiptId + "\n\n" + "\u0000";
             connections.send(this.connectionId, receiptResponse);
         }
     }
 
     private void send (String body) {
-        Pattern header = Pattern.compile("destination:(.*)\n\n(.*)\n");
-        Pattern header1 = Pattern.compile("destination:(.*)\nreceipt-id:.*\n" + "(.*)\n");
+        Pattern header = Pattern.compile("destination:(.*)\n\n(.*)\n", Pattern.DOTALL);
+        Pattern header1 = Pattern.compile("destination:(.*)\nreceipt-id:.*\n\n(.*)\n", Pattern.DOTALL);
         Pattern header4 = Pattern.compile("receipt-id:(.*)\n");
-
         Matcher matcher = header.matcher(body);
         Matcher matcher1 = header1.matcher(body);
         if (!matcher.find() && !matcher1.find()) {
@@ -142,36 +131,32 @@ public class StompMessagingProtocolImpl<T> implements StompMessagingProtocol<Str
         String destination;
         String content;
         if (matcher1.find()) {
-            destination = matcher1.group(1);
-            content = matcher1.group(2);
+            destination = matcher1.group(1).trim();
+            content = matcher1.group(2).trim();
         } else {
-            destination = matcher.group(1);
-            content = matcher.group(2);
+            destination = matcher.group(1).trim();
+            content = matcher.group(2).trim();
         }
-        ArrayList<Integer> subscribers = new ArrayList<>();
-        for(Map.Entry<String, Integer> entry : SubscriptiontoChannelname.entrySet()) {
-            if (entry.getKey().equals(destination)) {
-                subscribers.add(entry.getValue());
+
+        Map<Integer, Integer> subscribers = ChannelnametoSubscriptionID.get(destination);
+        if (subscribers != null) {
+            int msgId = messageId.getAndIncrement();
+            for (Map.Entry<Integer, Integer> entry : subscribers.entrySet()) {
+                int targetConnId = entry.getKey();
+                int targetSubId = entry.getValue();
+                String message = "MESSAGE\n" + 
+                                "subscription:" + targetSubId + "\n" + 
+                                "message-id:" + msgId + "\n" + 
+                                "destination:" + destination + "\n\n" + 
+                                content + "\n" + "\u0000";
+                connections.send(targetConnId, message);
             }
         }
-        for (Integer subId : subscribers) {
-            String message = "MESSAGE\n" +
-                            "subscription:" + subId + "\n" +
-                            "message-id:" + this.messageId + "\n" +
-                            "destination:" + destination + "\n\n" +
-                            content + "\n" +
-                            "\u0000";
-            connections.send(this.connectionId, message);
-        }
-        this.messageId += 1;
-
 
         Matcher matcher4 = header4.matcher(body);
         if (matcher4.find()) {
-            String receiptId = matcher4.group(1);
-            String receiptResponse = "RECEIPT\n" +
-                                     "receipt-id:" + receiptId + "\n\n" +
-                                     "\u0000";
+            String receiptId = matcher4.group(1).trim();
+            String receiptResponse = "RECEIPT\n" + "receipt-id:" + receiptId + "\n\n" + "\u0000";
             connections.send(this.connectionId, receiptResponse);
         }
     }
@@ -190,68 +175,73 @@ public class StompMessagingProtocolImpl<T> implements StompMessagingProtocol<Str
             this.error("Missing id header");
             return;
         }
-        String destination = matcher.group(1);
-        String id = matcher1.group(1);
-        int subId = Integer.parseInt(id);
-        SubscriptiontoChannelname.put(destination, subId);
+        String destination = matcher.group(1).trim();
+        int subId = Integer.parseInt(matcher1.group(1).trim());
 
+        if (mySubscriptions.containsKey(subId)) {
+            this.error("Subscription id already in use for this client");
+            return;
+        }
+
+        mySubscriptions.put(subId, destination);
+        ChannelnametoSubscriptionID.computeIfAbsent(destination, k -> new ConcurrentHashMap<>()).put(this.connectionId, subId);
 
         Matcher matcher4 = header4.matcher(body);
         if (matcher4.find()) {
-            String receiptId = matcher4.group(1);
-            String receiptResponse = "RECEIPT\n" +
-                                     "receipt-id:" + receiptId + "\n\n" +
-                                     "\u0000";
+            String receiptId = matcher4.group(1).trim();
+            String receiptResponse = "RECEIPT\n" + "receipt-id:" + receiptId + "\n\n" + "\u0000";
             connections.send(this.connectionId, receiptResponse);
         }
-
     }
 
     private void unsubscribe (String body) {
-        Pattern header4 = Pattern.compile("receipt-id:(.*)\n");
         Pattern header1 = Pattern.compile("id:(.*)\n");
+        Pattern header4 = Pattern.compile("receipt-id:(.*)\n");
         Matcher matcher1 = header1.matcher(body);
         if (!matcher1.find()) {
             this.error("Missing id header");
             return;
         }
-        String id = matcher1.group(1);
-        int subId = Integer.parseInt(id);
-        this.SubscriptiontoChannelname.values().removeIf(value -> value.equals(subId));
+        int subId = Integer.parseInt(matcher1.group(1).trim());
+        String destination = mySubscriptions.remove(subId);
+        if (destination != null) {
+            Map<Integer, Integer> subscribers = ChannelnametoSubscriptionID.get(destination);
+            if (subscribers != null) {
+                subscribers.remove(this.connectionId);
+            }
+        }
 
         Matcher matcher4 = header4.matcher(body);
         if (matcher4.find()) {
-            String receiptId = matcher4.group(1);
-            String receiptResponse = "RECEIPT\n" +
-                                     "receipt-id:" + receiptId + "\n\n" +
-                                     "\u0000";
+            String receiptId = matcher4.group(1).trim();
+            String receiptResponse = "RECEIPT\n" + "receipt-id:" + receiptId + "\n\n" + "\u0000";
             connections.send(this.connectionId, receiptResponse);
         }
-
     }
 
     private void disconnect (String body) {
         Pattern header4 = Pattern.compile("receipt-id:(.*)\n");
-        this.connectionIdToUser.remove(this.connectionId);
-        this.shouldTerminate = true;
-        
         Matcher matcher4 = header4.matcher(body);
         if (matcher4.find()) {
-            String receiptId = matcher4.group(1);
-            String receiptResponse = "RECEIPT\n" +
-                                     "receipt-id:" + receiptId + "\n\n" +
-                                     "\u0000";
+            String receiptId = matcher4.group(1).trim();
+            String receiptResponse = "RECEIPT\n" + "receipt-id:" + receiptId + "\n\n" + "\u0000";
             connections.send(this.connectionId, receiptResponse);
         }
+
+        for (String dest : mySubscriptions.values()) {
+            Map<Integer, Integer> subs = ChannelnametoSubscriptionID.get(dest);
+            if (subs != null) {
+                subs.remove(this.connectionId);
+            }
+        }
+        
+        connectionIdToUser.remove(this.connectionId);
+        this.shouldTerminate = true;
     }
 
-
     private void error (String errorMessage) {
-        String response = "ERROR\n" +
-                          "message:" + errorMessage + "\n\n" +
-                          "\u0000";
+        String response = "ERROR\n" + "message:" + errorMessage + "\n\n" + "\u0000";
         connections.send(this.connectionId, response);
         this.shouldTerminate = true;
     }
-    
 }
