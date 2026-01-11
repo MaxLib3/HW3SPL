@@ -106,6 +106,10 @@ void StompProtocol::handleReport(const string& file, ConnectionHandler* handler)
         return;
     }
 
+    std::sort(data.events.begin(), data.events.end(), [](const Event& a, const Event& b) {
+        return a.get_time() < b.get_time();
+    });
+
     string gameName = data.team_a_name + "_" + data.team_b_name;
     for (Event& event : data.events) 
     {
@@ -124,6 +128,10 @@ void StompProtocol::saveEvent(string gameName, string user, Event& event) {
     std::lock_guard<std::mutex> lock(mutex);
     GameStats& stats = gameUpdates[gameName][user];
     stats.events.push_back(event);
+    std::sort(stats.events.begin(), stats.events.end(), [](const Event& a, const Event& b) {
+        return a.get_time() < b.get_time();
+    });
+
     for (auto const& pair : event.get_game_updates()) 
         stats.generalStats[pair.first] = pair.second;
     for (auto const& pair : event.get_team_a_updates()) 
