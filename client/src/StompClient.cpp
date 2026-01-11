@@ -3,6 +3,7 @@
 #include <string>
 #include <sstream>
 #include <thread>
+#include <memory>
 
 using std::cin;
 using std::cout;
@@ -13,9 +14,9 @@ using std::vector;
 #include "../include/ConnectionHandler.h"
 #include "../include/StompProtocol.h"
 
-void getFramesFromServer(ConnectionHandler* connectionHandler, StompProtocol& stompProtocol, volatile bool& shouldTerminate);
-ConnectionHandler* handleLogin(string& username);
-vector<string> split(const string& str, char delimiter);
+void getFramesFromServer(ConnectionHandler*, StompProtocol&, volatile bool&);
+ConnectionHandler* handleLogin(string&);
+vector<string> split(const string&, char);
 
 int main(int argc, char *argv[])
 {
@@ -31,7 +32,7 @@ int main(int argc, char *argv[])
 	stompProtocol.setUsername(username);
 
 	volatile bool shouldTerminate = false;
-	std::thread listener(getFramesFromServer, connectionHandler, stompProtocol, std::ref(shouldTerminate));
+	std::thread listener(getFramesFromServer, connectionHandler, std::ref(stompProtocol), std::ref(shouldTerminate));
 
 	while (!shouldTerminate) {
         const short bufsize = 1024;
@@ -40,7 +41,7 @@ int main(int argc, char *argv[])
         string line(buf);
 
         if (line.empty()) continue;
-        protocol.processKeyboardCommand(line, handler);
+        stompProtocol.processKeyboardCommand(line, connectionHandler);
     }
 
 	if (listener.joinable()) listener.join();

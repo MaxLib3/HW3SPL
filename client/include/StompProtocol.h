@@ -6,7 +6,13 @@
 #include <vector>
 #include <map>
 #include <mutex>
+#include <sstream>
+#include <fstream>
+#include <iostream>
+#include <exception>
 
+using std::cout;
+using std::endl;
 using std::string;
 using std::vector;
 using std::map;
@@ -14,42 +20,48 @@ using std::map;
 class StompProtocol {
 private:
     string username;
-    int subscriptionIdCounter;
+    int subIdCounter;
     int receiptIdCounter;
     bool shouldTerminate;
     std::mutex mutex;
 
-    // Map: GameName -> SubscriptionID (To know what to Unsubscribe)
-    map<string, int> activeSubscriptions;
-    // Map: ReceiptID -> Action (To handle receipt responses like "logout")
-    map<int, string> receiptActions;
+    // Map: GameName -> SubscriptionID
+    map<string, int> subscriptions;
 
-    // Complex State for Summary:
-    // GameName -> (UserName -> { GeneralStats, TeamAStats, TeamBStats, EventList })
-    struct UserGameStats {
+    // Map: ReceiptID -> Action Description
+    map<int, string> pendingReceipts;
+
+    // GameName -> (UserName -> { Stats, Events })
+    struct GameStats {
         map<string, string> generalStats;
         map<string, string> teamAStats;
         map<string, string> teamBStats;
         vector<Event> events;
-    }; 
-    map<string, map<string, UserGameStats>> gameUpdates; 
+    };
+    map<string, map<string, GameStats>> gameUpdates; 
+
+    // Keyboard Command Handlers
+    void handleJoin(const string& gameName, ConnectionHandler* handler);
+    void handleExit(const string& gameName, ConnectionHandler* handler);
+    void handleLogout(ConnectionHandler* handler);
+    void handleReport(const string& file, ConnectionHandler* handler);
+    void handleSummary(const string& gameName, const string& user, const string& file);
+
+    // Server Frame Handlers
+    void handleServerConnected(const string& frame);
+    void handleServerReceipt(const string& frame);
+    void handleServerError(const string& frame);
+    void handleServerMessage(const string& frame);
+
+    // Helper Methods
+    void sendFrame(ConnectionHandler* handler, string body);
+    void saveEvent(string gameName, string user, Event& event);
+    string buildEventBody(const Event& event, string user, string gameName);
 
 public:
     StompProtocol();
 
-    // Set the username upon login
     void setUsername(string username);
-
-    // Main Thread Operations
-    // Processes keyboard commands and sends frames via handler
     void processKeyboardCommand(const string& commandLine, ConnectionHandler* handler);
-
-    // Listener Thread Operations
-    // Processes incoming frames from the server
     bool processServerFrame(const string& frame);
-
-    // Helper Methods
-    void sendFrame(ConnectionHandler* handler, string body);
-    void updateGameState(string gameName, string user, Event& event);
-    string formatEventMessage(const Event& event, string user, string gameName);
 };
