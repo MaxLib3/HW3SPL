@@ -36,7 +36,7 @@ public:
     const std::map<std::string, std::string> &get_game_updates() const;
     const std::map<std::string, std::string> &get_team_a_updates() const;
     const std::map<std::string, std::string> &get_team_b_updates() const;
-    const std::string &get_discription() const;
+    const std::string &get_description() const;
 };
 
 // an object that holds the names of the teams and a vector of events, to be returned by the parseEventsFile function

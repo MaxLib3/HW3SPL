@@ -56,7 +56,7 @@ const std::map<std::string, std::string> &Event::get_team_b_updates() const
     return this->team_b_updates;
 }
 
-const std::string &Event::get_discription() const
+const std::string &Event::get_description() const
 {
     return this->description;
 }

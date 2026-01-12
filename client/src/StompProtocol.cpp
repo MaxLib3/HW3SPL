@@ -1,4 +1,5 @@
-#include "StompProtocol.h"
+#include "../include/StompProtocol.h"
+#include <regex.h>
 
 StompProtocol::StompProtocol() : 
     subIdCounter(0), receiptIdCounter(0), shouldTerminate(false) {}
@@ -58,8 +59,8 @@ void StompProtocol::handleJoin(const string& gameName, ConnectionHandler* handle
 
     string frame = "SUBSCRIBE\n"
                    "destination:/" + gameName + "\n"
-                   "id:" + subId + "\n"
-                   "receipt:" + receiptId + "\n"
+                   "id:" + to_string(subId) + "\n"
+                   "receipt:" + to_string(receiptId) + "\n"
                    "\n"
                    "\0";
     sendFrame(handler, frame);
@@ -78,8 +79,8 @@ void StompProtocol::handleExit(const string& gameName, ConnectionHandler* handle
     subscriptions.erase(gameName);
 
     string frame = "UNSUBSCRIBE\n"
-                   "id:" + subId + "\n"
-                   "receipt:" + receiptId + "\n"
+                   "id:" + to_string(subId) + "\n"
+                   "receipt:" + to_string(receiptId) + "\n"
                    "\n"
                    "\0";
     sendFrame(handler, frame);
@@ -91,7 +92,7 @@ void StompProtocol::handleLogout(ConnectionHandler* handler) {
     pendingReceipts[receiptId] = "DISCONNECT";
 
     string frame = "DISCONNECT\n"
-                   "receipt:" + receiptId + "\n"
+                   "receipt:" + to_string(receiptId) + "\n"
                    "\n"
                    "\0";
     sendFrame(handler, frame);
@@ -113,8 +114,8 @@ void StompProtocol::handleReport(const string& file, ConnectionHandler* handler)
     string gameName = data.team_a_name + "_" + data.team_b_name;
     for (Event& event : data.events) 
     {
-        saveEvent(gameName, this.username, event);
-        string body = buildEventBody(event, this.username, gameName);
+        saveEvent(gameName, this->username, event);
+        string body = buildEventBody(event, this->username, gameName);
         string frame = "SEND\n"
                        "destination:/" + gameName + "\n"
                        "\n" + 
@@ -210,21 +211,145 @@ void StompProtocol::handleSummary(const string& gameName, const string& user, co
 
 // Server Frame Processing
 bool StompProtocol::processServerFrame(const string& frame) {
+    char spliter = '\n';
+    vector<string> result = split(frame, spliter);
+    
+    if (result.size() == 0) return false;
+
+    string command = trim(result[0]);
+    if (command == "CONNECTED") {
+        result.erase(result.begin());
+        handleServerConnected(result);
+    } 
+    else if (command == "ERROR") {
+        result.erase(result.begin());
+        handleServerError(result);
+    } 
+    else if (command == "MESSAGE") {
+        result.erase(result.begin());
+        handleServerMessage(result);
+    } 
+    else if (command == "RECEIPT") {
+        result.erase(result.begin());
+        handleServerReceipt(result);
+    } 
+    else {
+        return false; 
+    }
+
+    return true;
 
 }
 
-void StompProtocol::handleServerConnected(const string& frame) {
-
+string trim(const string& str){
+    int firstindex = 0;
+    bool found = false;
+    for (int i = 0; i < str.length() && !found; i++)
+    {
+        if (str[i] != ' ' && str[i] != '\n' && str[i] != '\r' && str[i] != '\t'){
+            firstindex = i;
+            found = true;
+        }
+    }
+    found = false;
+    string midstr(""); 
+    midstr = str.substr(firstindex);
+    int lastindex = str.length() - 1;
+    for (int i = str.length() - 1; i >= 0 && !found; i--)
+    {
+        if (str[i] != ' ' && str[i] != '\n' && str[i] != '\r' && str[i] != '\t'){
+            lastindex = i;
+            found = true;
+        }
+    }
+    string retval = midstr.substr(0, lastindex + 1);
+    return retval;
 }
 
-void StompProtocol::handleServerReceipt(const string& frame) {
-
+vector<string> split(const string& str, char delimiter) {
+    vector<string> tokens;
+    string line("");
+    for (char c : str) {
+        if (c == delimiter) {
+            tokens.push_back(line);
+            line = "";
+        } else {
+            line += c;
+        }
+    }
+    tokens.push_back(line);
+    return tokens;
 }
 
-void StompProtocol::handleServerError(const string& frame) {
-
+void StompProtocol::handleServerConnected(const vector<string>& lines) {
+    std::regex versionRegex("version:\\s*([0-9\\.]+)");
+    for (const string& line : lines) {
+        std::smatch match;
+        if (std::regex_search(line, match, versionRegex)) {
+            string version = match[1];
+            version = trim(version);
+            if (version == "1.2")
+            {
+                cout << "Login successful" << endl;
+            }
+        }
+    }
 }
 
-void StompProtocol::handleServerMessage(const string& frame) {
+void StompProtocol::handleServerReceipt(const vector<string>& lines) {
+    std::lock_guard<std::mutex> lock(mutex);
+    std::regex receiptRegex("receipt-id:\\s*(\\d+)");
+    for (const string& line : lines) {
+        std::smatch match;
+        if (std::regex_search(line, match, receiptRegex)) {
+            int receiptId = std::stoi(match[1]);
+            if (pendingReceipts.find(receiptId) != pendingReceipts.end()) {
+                string action = pendingReceipts[receiptId];
+                if (action == "DISCONNECT") {
+                    shouldTerminate = true;
+                }
+                pendingReceipts.erase(receiptId);
+            }
+        }
+    }
+}
 
+void StompProtocol::handleServerError(const vector<string>& lines) {
+    string errorMsg = "Error from server:";
+    for (const string& line : lines) {
+        errorMsg += "\n" + line;
+    }
+    cout << errorMsg << endl;
+}
+
+void StompProtocol::handleServerMessage(const vector<string>& lines) {
+    string destination = "";
+    string body = "";
+    bool readingBody = false;
+
+    for (const string& line : lines) {
+        if (!readingBody && trim(line).empty()) {
+            readingBody = true;
+            continue;
+        }
+
+        if (readingBody) {
+            string cleanLine = line;
+            if (!cleanLine.empty() && cleanLine.back() == '\0') {
+                cleanLine.pop_back();
+            }
+            body += cleanLine;
+        } else {
+            std::smatch match;
+            std::regex destRegex("destination:\\s*(.*)");
+            
+            if (std::regex_search(line, match, destRegex)) {
+                destination = trim(match[1]);
+            }
+        }
+    }
+
+    if (!destination.empty()) {
+        cout << "Received message for " << destination << ": " << body << endl;
+    }
 }

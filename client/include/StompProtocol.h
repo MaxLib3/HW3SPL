@@ -10,12 +10,15 @@
 #include <fstream>
 #include <iostream>
 #include <exception>
+#include <regex>
 
 using std::cout;
 using std::endl;
 using std::string;
 using std::vector;
 using std::map;
+using std::stringstream;
+using std::to_string;
 
 class StompProtocol {
 private:
@@ -48,15 +51,17 @@ private:
     void handleSummary(const string& gameName, const string& user, const string& file);
 
     // Server Frame Handlers
-    void handleServerConnected(const string& frame);
-    void handleServerReceipt(const string& frame);
-    void handleServerError(const string& frame);
-    void handleServerMessage(const string& frame);
+    void handleServerConnected(const vector<string>& lines);
+    void handleServerReceipt(const vector<string>& lines);
+    void handleServerError(const vector<string>& lines);
+    void handleServerMessage(const vector<string>& lines);
 
     // Helper Methods
     void sendFrame(ConnectionHandler* handler, string body);
     void saveEvent(string gameName, string user, Event& event);
     string buildEventBody(const Event& event, string user, string gameName);
+    string trim(const string& str);
+    vector<string> split(const string& str, char delimiter);
 
 public:
     StompProtocol();
