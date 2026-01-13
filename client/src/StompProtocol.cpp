@@ -213,7 +213,6 @@ void StompProtocol::handleSummary(const string& gameName, const string& user, co
 bool StompProtocol::processServerFrame(const string& frame) {
     char spliter = '\n';
     vector<string> result = split(frame, spliter);
-    
     if (result.size() == 0) return false;
 
     string command = trim(result[0]);
@@ -224,6 +223,7 @@ bool StompProtocol::processServerFrame(const string& frame) {
     else if (command == "ERROR") {
         result.erase(result.begin());
         handleServerError(result);
+        return false;
     } 
     else if (command == "MESSAGE") {
         result.erase(result.begin());
@@ -232,16 +232,15 @@ bool StompProtocol::processServerFrame(const string& frame) {
     else if (command == "RECEIPT") {
         result.erase(result.begin());
         handleServerReceipt(result);
+        if (shouldTerminate) return false; 
     } 
     else {
         return false; 
     }
-
     return true;
-
 }
 
-string trim(const string& str){
+string StompProtocol::trim(const string& str){
     int firstindex = 0;
     bool found = false;
     for (int i = 0; i < str.length() && !found; i++)
@@ -266,7 +265,7 @@ string trim(const string& str){
     return retval;
 }
 
-vector<string> split(const string& str, char delimiter) {
+vector<string> StompProtocol::split(const string& str, char delimiter) {
     vector<string> tokens;
     string line("");
     for (char c : str) {
@@ -320,36 +319,103 @@ void StompProtocol::handleServerError(const vector<string>& lines) {
         errorMsg += "\n" + line;
     }
     cout << errorMsg << endl;
+    shouldTerminate = true;
 }
 
 void StompProtocol::handleServerMessage(const vector<string>& lines) {
-    string destination = "";
-    string body = "";
+    string gameName = "";
     bool readingBody = false;
 
-    for (const string& line : lines) {
-        if (!readingBody && trim(line).empty()) {
+    // Needed parameters for event
+    string user = "";
+    string teamA = "";
+    string teamB = "";
+    string eventName = "";
+    int time = 0;
+    string description = "";
+    std::map<string, string> generalUpdates;
+    std::map<string, string> teamAUpdates;
+    std::map<string, string> teamBUpdates;
+    
+    string currentSection = "";
+    for (const string& rawLine : lines) {
+        if (!readingBody && trim(rawLine).empty()) {
             readingBody = true;
             continue;
         }
 
-        if (readingBody) {
-            string cleanLine = line;
-            if (!cleanLine.empty() && cleanLine.back() == '\0') {
-                cleanLine.pop_back();
+        if (!readingBody) {
+            // Header parse
+            string line = trim(rawLine);
+            if (line.find("destination:") == 0) {
+                gameName = trim(line.substr(12));
+                if (!gameName.empty() && gameName[0] == '/') {
+                    gameName = gameName.substr(1);
+                }
             }
-            body += cleanLine;
-        } else {
-            std::smatch match;
-            std::regex destRegex("destination:\\s*(.*)");
-            
-            if (std::regex_search(line, match, destRegex)) {
-                destination = trim(match[1]);
+        } 
+        else {
+            // Body parse
+            string line = rawLine;
+            if (!line.empty() && line.back() == '\0') line.pop_back();
+            string trimmed = trim(line);
+
+            // Detect Sections
+            if (trimmed == "general game updates:") { 
+                currentSection = "general"; 
+                continue; 
+            }
+            else if (trimmed == "team a updates:") { 
+                currentSection = "teamA"; 
+                continue; 
+            }
+            else if (trimmed == "team b updates:") { 
+                currentSection = "teamB"; 
+                continue; 
+            }
+            else if (trimmed == "description:") { 
+                currentSection = "description"; 
+                continue; 
+            }
+
+            // Parse content based on current section
+            if (currentSection == "") {
+                // We are in the standard fields (user, time, event name, etc.)
+                size_t colon = line.find(':');
+                if (colon != string::npos) {
+                    string key = trim(line.substr(0, colon));
+                    string val = trim(line.substr(colon + 1));
+
+                    if (key == "user") user = val;
+                    else if (key == "team a") teamA = val;
+                    else if (key == "team b") teamB = val;
+                    else if (key == "event name") eventName = val;
+                    else if (key == "time") time = std::stoi(val);
+                }
+            }
+            else if (currentSection == "description") {
+                description += line + "\n";
+            }
+            else {
+                // We are in one of the update maps (general/teamA/teamB)
+                size_t colon = line.find(':');
+                if (colon != string::npos) {
+                    string key = trim(line.substr(0, colon));
+                    string val = trim(line.substr(colon + 1));
+
+                    if (currentSection == "general") generalUpdates[key] = val;
+                    else if (currentSection == "teamA") teamAUpdates[key] = val;
+                    else if (currentSection == "teamB") teamBUpdates[key] = val;
+                }
             }
         }
     }
 
-    if (!destination.empty()) {
-        cout << "Received message for " << destination << ": " << body << endl;
+    if (!user.empty() && !gameName.empty()) {
+        Event event(teamA, teamB, eventName, time, 
+                    generalUpdates, teamAUpdates, teamBUpdates, 
+                    description);    
+        saveEvent(gameName, user, event);
+        cout << "Received update for " << gameName << " from " << user << endl;
     }
 }

@@ -80,23 +80,22 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
             return;
         }
 
-        synchronized (ConnectedClients) {
-            if (ConnectedClients.containsKey(login)) {
-                sendError("User already logged in", "User " + login + " is already active", receipt);
+        
+        if (ConnectedClients.containsKey(login)) {
+            sendError("User already logged in", "User " + login + " is already active", receipt);
+            return;
+        }
+        if (LoggedIn.containsKey(login)) {
+            if (!LoggedIn.get(login).equals(passcode)) {
+                sendError("Wrong password", "Password does not match", receipt);
                 return;
             }
-
-            if (LoggedIn.containsKey(login)) {
-                if (!LoggedIn.get(login).equals(passcode)) {
-                    sendError("Wrong password", "Password does not match", receipt);
-                    return;
-                }
-            } else {
-                LoggedIn.put(login, passcode);
-            }
-            ConnectedClients.put(login, connectionId);
-            this.user = login;
+        } else {
+            LoggedIn.put(login, passcode);
         }
+        
+        ConnectedClients.put(login, connectionId);
+        this.user = login;
         sendFrame("CONNECTED\n" + "version:1.2\n");
         if (receipt != null) {
             sendFrame("RECEIPT\n" + "receipt-id:" + receipt + "\n");
