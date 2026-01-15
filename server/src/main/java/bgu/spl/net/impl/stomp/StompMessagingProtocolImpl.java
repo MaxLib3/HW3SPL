@@ -30,6 +30,7 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
 
     @Override
     public void process(String message) {
+        System.out.println("Processing message from connection " + connectionId + ":\n" + message + "\n");
         String[] lines = message.split("\n");
         if (lines.length == 0) return;
 
@@ -111,6 +112,7 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
             return;
         }
 
+        System.out.println("Subscribing to " + dest + " with id " + id);
         subscriptionIdToChannel.put(id, dest);
         connections.subscribe(dest, connectionId, id);
         if (receipt != null) {
@@ -191,6 +193,7 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
     }
 
     private void sendFrame(String frameBody) {
+        System.out.println("Sending frame to connection " + connectionId + ":\n" + frameBody + "\n\u0000");
         connections.send(connectionId, frameBody + "\n\u0000"); 
     }
 

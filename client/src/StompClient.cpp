@@ -15,7 +15,7 @@ using std::vector;
 #include "../include/StompProtocol.h"
 
 void getFramesFromServer(ConnectionHandler*, StompProtocol&, volatile bool&);
-ConnectionHandler* handleLogin(string&);
+ConnectionHandler* handleLogin(string&, string);
 vector<string> split(const string&, char);
 
 int main(int argc, char *argv[])
@@ -24,28 +24,39 @@ int main(int argc, char *argv[])
 
 	StompProtocol stompProtocol;
 	string username;
-	ConnectionHandler* connectionHandler = handleLogin(username);
-	if (connectionHandler == nullptr) {
-		cout << "Exiting...\n" << endl;
-		return 0;
-	}
-	stompProtocol.setUsername(username);
+    ConnectionHandler* connectionHandler;
+    string commandBacklog = "";
+    
+    while (true) {
+        connectionHandler = handleLogin(username, commandBacklog);
+        commandBacklog = "";
+        if (connectionHandler == nullptr) {
+            cout << "Exiting...\n" << endl;
+            return 0;
+        }
+        stompProtocol.setUsername(username);
 
-	volatile bool shouldTerminate = false;
-	std::thread listener(getFramesFromServer, connectionHandler, std::ref(stompProtocol), std::ref(shouldTerminate));
+        volatile bool shouldTerminate = false;
+        std::thread listener(getFramesFromServer, connectionHandler, std::ref(stompProtocol), std::ref(shouldTerminate));
 
-	while (!shouldTerminate) {
-        const short bufsize = 1024;
-        char buf[bufsize];
-        cin.getline(buf, bufsize);
-        string line(buf);
+        while (!shouldTerminate) {
+            const short bufsize = 1024;
+            char buf[bufsize];
+            cin.getline(buf, bufsize);
+            string line(buf);
+            if (line.empty()) continue;
 
-        if (line.empty()) continue;
-        stompProtocol.processKeyboardCommand(line, connectionHandler);
+            if (shouldTerminate) {
+                commandBacklog = line;
+                break;
+            }
+            stompProtocol.processKeyboardCommand(line, connectionHandler);
+        }
+
+        if (listener.joinable()) listener.join();
+        delete connectionHandler;
     }
 
-	if (listener.joinable()) listener.join();
-	delete connectionHandler;
 	return 0;
 }
 
@@ -60,23 +71,30 @@ void getFramesFromServer(ConnectionHandler* connectionHandler, StompProtocol& st
 		}
 
 		if (!stompProtocol.processServerFrame(frame)) {
+            cout << "Disconnected.\n" << endl;
             shouldTerminate = true;
             break;
         }
 	}
 }
 
-ConnectionHandler* handleLogin(string& username) 
+ConnectionHandler* handleLogin(string& username, string initialInput)
 {
+    bool firstAttempt = true;
 	while (true) 
 	{
-        const short bufsize = 1024;
-        char buf[1024];  
-		
-		cout << "Enter login command: " << endl;
-        cin.getline(buf, bufsize);
-        string line(buf);
-        if (line.empty()) continue;
+        string line;
+        if (firstAttempt && !initialInput.empty()) {
+            line = initialInput;
+            firstAttempt = false;
+        } else {
+            const short bufsize = 1024;
+            char buf[1024];
+            cout << "Enter login command: " << endl;
+            cin.getline(buf, bufsize);
+            line = string(buf);
+        }
+        if (line.empty()) continue; 
 
         vector<string> args = split(line, ' ');
         if (args.size() > 0 && args[0] == "exit") {

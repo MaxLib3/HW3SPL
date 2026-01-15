@@ -9,6 +9,7 @@ void StompProtocol::setUsername(string username) {
 }
 
 void StompProtocol::sendFrame(ConnectionHandler* handler, string frame) {
+    cout << "Sending frame to server:\n" << frame << std::endl;
     if (!handler->sendFrameAscii(frame, '\0')) {
         cout << "Error: Connection lost while sending frame" << endl;
         shouldTerminate = true;
@@ -114,7 +115,7 @@ void StompProtocol::handleReport(const string& file, ConnectionHandler* handler)
     string gameName = data.team_a_name + "_" + data.team_b_name;
     for (Event& event : data.events) 
     {
-        saveEvent(gameName, this->username, event);
+        //saveEvent(gameName, this->username, event);
         string body = buildEventBody(event, this->username, gameName);
         string frame = "SEND\n"
                        "destination:/" + gameName + "\n"
@@ -216,6 +217,9 @@ bool StompProtocol::processServerFrame(const string& frame) {
     if (result.size() == 0) return false;
 
     string command = trim(result[0]);
+    if (command.length() == 0) return true;
+
+    cout << "Received frame from server: " << frame << endl;
     if (command == "CONNECTED") {
         result.erase(result.begin());
         handleServerConnected(result);

@@ -55,6 +55,7 @@ public class ConnectionsImpl<T> implements Connections<T> {
     public void subscribe(String channel, int connectionId, String subscriptionId) {
         channels.computeIfAbsent(channel, k -> new ConcurrentHashMap<>())
                 .put(connectionId, subscriptionId);
+        System.out.println("Current subscribers to " + channel + ": " + channels.get(channel).size());
     }
 
     public void unsubscribe(String channel, int connectionId) {
@@ -62,5 +63,6 @@ public class ConnectionsImpl<T> implements Connections<T> {
         if (subscribers != null) {
             subscribers.remove(connectionId);
         }
+        System.out.println("Current subscribers to " + channel + ": " + channels.get(channel).size());
     }
 }
