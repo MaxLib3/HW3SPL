@@ -1,6 +1,8 @@
 package bgu.spl.net.impl.stomp;
 
 import bgu.spl.net.api.StompMessagingProtocol;
+import bgu.spl.net.impl.data.Database;
+import bgu.spl.net.impl.data.LoginStatus;
 import bgu.spl.net.srv.Connections;
 import bgu.spl.net.srv.ConnectionsImpl;
 
@@ -18,8 +20,7 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
     private ConcurrentHashMap<String, String> subscriptionIdToChannel = new ConcurrentHashMap<>();
 
     // Static shared data structures for all protocol instances
-    private static final ConcurrentHashMap<String, String> LoggedIn = new ConcurrentHashMap<>(); 
-    private static final ConcurrentHashMap<String, Integer> ConnectedClients = new ConcurrentHashMap<>();
+    private static Database database = Database.getInstance();
     private static final AtomicInteger msgId = new AtomicInteger(0);
 
     @Override
@@ -81,21 +82,20 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
             return;
         }
 
-        
-        if (ConnectedClients.containsKey(login)) {
+        LoginStatus status = database.login(connectionId, passcode, receipt);
+        if (status == LoginStatus.CLIENT_ALREADY_CONNECTED) {
             sendError("User already logged in", "User " + login + " is already active", receipt);
             return;
         }
-        if (LoggedIn.containsKey(login)) {
-            if (!LoggedIn.get(login).equals(passcode)) {
-                sendError("Wrong password", "Password does not match", receipt);
-                return;
-            }
-        } else {
-            LoggedIn.put(login, passcode);
+        if (status == LoginStatus.ALREADY_LOGGED_IN) {
+            sendError("User already logged in", "User " + login + " is already active", receipt);
+            return;
+        }
+        if (status == LoginStatus.WRONG_PASSWORD) {
+            sendError("Wrong password", "Password does not match", receipt);
+            return;
         }
         
-        ConnectedClients.put(login, connectionId);
         this.user = login;
         sendFrame("CONNECTED\n" + "version:1.2\n");
         if (receipt != null) {
@@ -173,7 +173,7 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
     private void handleDisconnect(String message) {
         String receipt = extractHeader(message, "receipt");
         if (user != null) {
-            ConnectedClients.remove(user);
+            database.logout(connectionId);
         }
 
         if (receipt != null) {
@@ -206,7 +206,7 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
         
         sendFrame(frame);
         connections.disconnect(connectionId);
-        if (user != null) ConnectedClients.remove(user);
+        if (user != null) database.logout(connectionId);
         shouldTerminate = true;
     }
 }
