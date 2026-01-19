@@ -75,10 +75,9 @@ def execute_sql_query(sql_query: str) -> str:
     conn.close()
     strres = "SUCCESS"
     for row in result:
-        if(row.)
-        strres += "|" + row
-
-    return result
+        if row:
+            strres += "|" + row
+    return strres
 
 
 def handle_client(client_socket: socket.socket, addr):
@@ -91,15 +90,15 @@ def handle_client(client_socket: socket.socket, addr):
                 break
             message.strip()
             submessage = "SELECT"
+            result = ""
             if submessage in message.upper():
                 result = execute_sql_query(message)
-                return result
             else:
-                execute_sql_command(message)
+                result = execute_sql_command(message)
             print(f"[{SERVER_NAME}] Received:")
             print(message)
-
-            client_socket.sendall(b"done\0")
+            print(result)
+            client_socket.sendall(result.encode())
 
     except Exception as e:
         print(f"[{SERVER_NAME}] Error handling client {addr}: {e}")
