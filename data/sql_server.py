@@ -40,6 +40,20 @@ def init_database():
             registration_date TEXT NOT NULL
         )
         """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS login_history (
+            username TEXT PRIMARY KEY,
+            login_time TEXT NOT NULL          
+                   )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS file_tracking (
+            username TEXT PRIMARY KEY,
+            filename TEXT NOT NULL
+            upload_time TEXT NOT NULL
+            game_channel TEXT NOT NULL           
+                   )
+    """)
     conn.commit()
     conn.close()
 
@@ -50,11 +64,20 @@ def execute_sql_command(sql_command: str) -> str:
     cursor.execute(sql_command)
     conn.commit()
     conn.close()
-    return "done"
+    return "SUCCESS"
 
 
 def execute_sql_query(sql_query: str) -> str:
-    return "done"
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(sql_query)
+    result = cursor.fetchall()
+    conn.close()
+    strres = "SUCCESS"
+    for row in result:
+        if row:
+            strres += "|" + row
+    return strres
 
 
 def handle_client(client_socket: socket.socket, addr):
@@ -65,11 +88,17 @@ def handle_client(client_socket: socket.socket, addr):
             message = recv_null_terminated(client_socket)
             if message == "":
                 break
-
+            message.strip()
+            submessage = "SELECT"
+            result = ""
+            if submessage in message.upper():
+                result = execute_sql_query(message)
+            else:
+                result = execute_sql_command(message)
             print(f"[{SERVER_NAME}] Received:")
             print(message)
-
-            client_socket.sendall(b"done\0")
+            print(result)
+            client_socket.sendall(result.encode())
 
     except Exception as e:
         print(f"[{SERVER_NAME}] Error handling client {addr}: {e}")
