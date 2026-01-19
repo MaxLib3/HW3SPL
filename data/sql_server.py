@@ -11,6 +11,7 @@ the methods below.
 import socket
 import sys
 import threading
+import sqlite3
 
 
 SERVER_NAME = "STOMP_PYTHON_SQL_SERVER"  # DO NOT CHANGE!
@@ -30,10 +31,25 @@ def recv_null_terminated(sock: socket.socket) -> str:
 
 
 def init_database():
-    pass
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            useraname TEXT PRIMARY KEY,
+            password TEXT NOT NULL,
+            registration_date TEXT NOT NULL
+        )
+        """)
+    conn.commit()
+    conn.close()
 
 
 def execute_sql_command(sql_command: str) -> str:
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(sql_command)
+    conn.commit()
+    conn.close()
     return "done"
 
 
