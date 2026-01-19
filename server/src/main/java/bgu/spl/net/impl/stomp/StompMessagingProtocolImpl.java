@@ -82,7 +82,7 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
             return;
         }
 
-        LoginStatus status = database.login(connectionId, passcode, receipt);
+        LoginStatus status = database.login(connectionId, login, passcode);
         if (status == LoginStatus.CLIENT_ALREADY_CONNECTED) {
             sendError("User already logged in", "User " + login + " is already active", receipt);
             return;
@@ -165,6 +165,7 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
                           body;
         connections.send(dest, msgFrame);
 
+        database.trackFileUpload(user, body, dest);
         if (receipt != null) {
             sendFrame("RECEIPT\n" + "receipt-id:" + receipt + "\n");
         }

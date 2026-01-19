@@ -35,23 +35,25 @@ def init_database():
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            useraname TEXT PRIMARY KEY,
+            username TEXT PRIMARY KEY,
             password TEXT NOT NULL,
             registration_date TEXT NOT NULL
         )
         """)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS login_history (
-            username TEXT PRIMARY KEY,
-            login_time TEXT NOT NULL          
-                   )
+            username TEXT NOT NULL,
+            login_time TEXT NOT NULL,
+            PRIMARY KEY(username, login_time)
+        )
     """)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS file_tracking (
-            username TEXT PRIMARY KEY,
-            filename TEXT NOT NULL
-            upload_time TEXT NOT NULL
-            game_channel TEXT NOT NULL           
+            username TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            upload_time TEXT NOT NULL,
+            game_channel TEXT NOT NULL,
+            PRIMARY KEY(username, filename, upload_time)
                    )
     """)
     conn.commit()
@@ -98,7 +100,7 @@ def handle_client(client_socket: socket.socket, addr):
             print(f"[{SERVER_NAME}] Received:")
             print(message)
             print(result)
-            client_socket.sendall(result.encode())
+            client_socket.sendall((result + "\0").encode())
 
     except Exception as e:
         print(f"[{SERVER_NAME}] Error handling client {addr}: {e}")
@@ -113,7 +115,7 @@ def handle_client(client_socket: socket.socket, addr):
 def start_server(host="127.0.0.1", port=7778):
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
+    init_database()
     try:
         server_socket.bind((host, port))
         server_socket.listen(5)
