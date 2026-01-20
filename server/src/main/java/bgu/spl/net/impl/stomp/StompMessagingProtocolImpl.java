@@ -140,6 +140,7 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
 
     private void handleSend(String message) {
         String dest = extractHeader(message, "destination");
+        String filename = extractHeader(message, "filename");
         String receipt = extractHeader(message, "receipt");
         if (dest == null) {
             sendError("Malformed Frame", "Missing destination", receipt);
@@ -165,7 +166,7 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
                           body;
         connections.send(dest, msgFrame);
 
-        database.trackFileUpload(user, body, dest);
+        database.trackFileUpload(user, filename, dest);
         if (receipt != null) {
             sendFrame("RECEIPT\n" + "receipt-id:" + receipt + "\n");
         }

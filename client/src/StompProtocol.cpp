@@ -115,10 +115,10 @@ void StompProtocol::handleReport(const string& file, ConnectionHandler* handler)
     string gameName = data.team_a_name + "_" + data.team_b_name;
     for (Event& event : data.events) 
     {
-        //saveEvent(gameName, this->username, event);
         string body = buildEventBody(event, this->username, gameName);
         string frame = "SEND\n"
                        "destination:/" + gameName + "\n"
+                       "filename:" + file + "\n"
                        "\n" + 
                        body + "\n"
                        "\0";

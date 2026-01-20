@@ -42,44 +42,51 @@ def init_database():
         """)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS login_history (
-            username TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL REFERENCES users(username),
             login_time TEXT NOT NULL,
-            PRIMARY KEY(username, login_time)
+            logout_time TEXT DEFAULT NULL
         )
     """)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS file_tracking (
-            username TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL REFERENCES users(username),
             filename TEXT NOT NULL,
             upload_time TEXT NOT NULL,
             game_channel TEXT NOT NULL,
-            PRIMARY KEY(username, filename, upload_time)
-                   )
+        )
     """)
     conn.commit()
     conn.close()
 
 
 def execute_sql_command(sql_command: str) -> str:
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute(sql_command)
-    conn.commit()
-    conn.close()
-    return "SUCCESS"
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute(sql_command)
+        conn.commit()
+        conn.close()
+        return "SUCCESS"
+    except sqlite3.Error as e:
+        return "ERROR: " + str(e)
 
 
 def execute_sql_query(sql_query: str) -> str:
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute(sql_query)
-    result = cursor.fetchall()
-    conn.close()
-    strres = "SUCCESS"
-    for row in result:
-        if row:
-            strres += "|" + row
-    return strres
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute(sql_query)
+        result = cursor.fetchall()
+        conn.close()
+        strres = "SUCCESS"
+        for row in result:
+            if row:
+                strres += "|" + row
+        return strres
+    except sqlite3.Error as e:
+        return "ERROR: " + str(e)
 
 
 def handle_client(client_socket: socket.socket, addr):
@@ -90,13 +97,14 @@ def handle_client(client_socket: socket.socket, addr):
             message = recv_null_terminated(client_socket)
             if message == "":
                 break
-            message.strip()
-            submessage = "SELECT"
+
+            message = message.strip()
             result = ""
-            if submessage in message.upper():
+            if "SELECT" in message.upper():
                 result = execute_sql_query(message)
             else:
                 result = execute_sql_command(message)
+
             print(f"[{SERVER_NAME}] Received:")
             print(message)
             print(result)
