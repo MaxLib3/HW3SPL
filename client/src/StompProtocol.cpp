@@ -253,7 +253,6 @@ bool StompProtocol::processServerFrame(const string& frame) {
     string command = trim(result[0]);
     if (command.length() == 0) return true;
 
-    cout << "Received frame from server: " << frame << endl;
     if (command == "CONNECTED") {
         result.erase(result.begin());
         handleServerConnected(result);

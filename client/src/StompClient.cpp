@@ -40,9 +40,10 @@ int main(int argc, char *argv[])
         std::thread listener(getFramesFromServer, connectionHandler, std::ref(stompProtocol), std::ref(shouldTerminate));
 
         while (!shouldTerminate) {
+            after_keyboard:
             const short bufsize = 1024;
             char buf[bufsize];
-            cin.getline(buf, bufsize);
+            if (!cin.getline(buf, bufsize)) break;
             string line(buf);
             if (line.empty()) continue;
 
@@ -50,13 +51,17 @@ int main(int argc, char *argv[])
                 commandBacklog = line;
                 break;
             }
+            if(line.find("login") == 0) {
+                cout << "Error: Already logged in. Please logout first." << endl;
+                goto after_keyboard;
+            }
             stompProtocol.processKeyboardCommand(line, connectionHandler);
-        }
+            
 
+        }
         if (listener.joinable()) listener.join();
         delete connectionHandler;
     }
-
 	return 0;
 }
 
@@ -69,7 +74,7 @@ void getFramesFromServer(ConnectionHandler* connectionHandler, StompProtocol& st
 			shouldTerminate = true;
 			break;
 		}
-
+        std::cout << "Received frame from server:\n" << frame << std::endl;
 		if (!stompProtocol.processServerFrame(frame)) {
             cout << "Disconnected.\n" << endl;
             shouldTerminate = true;

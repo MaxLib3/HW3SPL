@@ -63,6 +63,7 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
     }
 
     private void handleConnect(String message) {
+        
         String version = extractHeader(message, "accept-version");
         String host = extractHeader(message, "host");
         String login = extractHeader(message, "login");
@@ -82,6 +83,7 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
         }
 
         LoginStatus status = database.login(connectionId, login, passcode);
+        
         if (status == LoginStatus.CLIENT_ALREADY_CONNECTED) {
             sendError("User already logged in", "User " + login + " is already active", receipt);
             return;
