@@ -28,13 +28,13 @@ private:
     bool shouldTerminate;
     std::mutex mutex;
 
-    // Map: GameName -> SubscriptionID
+    // (gameName, subscriptionID) map
     map<string, int> subscriptions;
 
-    // Map: ReceiptID -> Action Description
+    // (receiptID, action description) map
     map<int, string> pendingReceipts;
 
-    // GameName -> (UserName -> { Stats, Events })
+    // (gameName, (username, gameStats)) map
     struct GameStats {
         map<string, string> generalStats;
         map<string, string> teamAStats;

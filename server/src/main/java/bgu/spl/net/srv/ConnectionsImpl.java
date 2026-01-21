@@ -4,11 +4,10 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class ConnectionsImpl<T> implements Connections<T> {
 
-    // Map: ConnectionID -> ConnectionHandler
+    // (connectionID, ConnectionHandler) for all active connections
     private final ConcurrentHashMap<Integer, ConnectionHandler<T>> activeConnections;
     
-    // Map: ChannelName -> (ConnectionID -> SubscriptionID)
-    // We need this nested map so we know which subscription ID to use for each specific user.
+    // (channelName, (connectionID -> subscriptionID)) for all channels and their subscribers
     private final ConcurrentHashMap<String, ConcurrentHashMap<Integer, String>> channels;
 
     public ConnectionsImpl() {
@@ -34,8 +33,8 @@ public class ConnectionsImpl<T> implements Connections<T> {
             {
                 String subscriptionId = subscribers.get(connectionId);
                 String frame = (String) msg;
-                String personalizedFrame = frame.replaceFirst("MESSAGE\n", "MESSAGE\nsubscription:" + subscriptionId + "\n");           
-                send(connectionId, (T)personalizedFrame);
+                frame = frame.replaceFirst("MESSAGE\n", "MESSAGE\nsubscription:" + subscriptionId + "\n");           
+                send(connectionId, (T)frame);
             }
         }
     }

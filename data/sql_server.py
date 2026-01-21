@@ -54,7 +54,7 @@ def init_database():
             username TEXT NOT NULL REFERENCES users(username),
             filename TEXT NOT NULL,
             upload_time TEXT NOT NULL,
-            game_channel TEXT NOT NULL,
+            game_channel TEXT NOT NULL
         )
     """)
     conn.commit()
@@ -83,7 +83,7 @@ def execute_sql_query(sql_query: str) -> str:
         strres = "SUCCESS"
         for row in result:
             if row:
-                strres += "|" + row
+                strres += "|" + str(row)
         return strres
     except sqlite3.Error as e:
         return "ERROR: " + str(e)

@@ -16,10 +16,9 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
     private int connectionId;
     private ConnectionsImpl<String> connections;
     private boolean shouldTerminate = false;
-    private String user; // The specific user for this connection instance
+    private String user;
     private ConcurrentHashMap<String, String> subscriptionIdToChannel = new ConcurrentHashMap<>();
 
-    // Static shared data structures for all protocol instances
     private static Database database = Database.getInstance();
     private static final AtomicInteger msgId = new AtomicInteger(0);
 
@@ -146,14 +145,13 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
             sendError("Malformed Frame", "Missing destination", receipt);
             return;
         }
-
-        // User has to be subscribed to send messages to the topic
         if (!subscriptionIdToChannel.containsValue(dest)) {
             sendError("Access Denied", "User not subscribed to topic", receipt);
             return;
         }
+        if (filename != null)
+            database.trackFileUpload(user, filename, dest);
 
-        // Get message body
         String body = "";
         int bodyIdx = message.indexOf("\n\n");
         if (bodyIdx != -1) {
@@ -166,7 +164,6 @@ public class StompMessagingProtocolImpl implements StompMessagingProtocol<String
                           body;
         connections.send(dest, msgFrame);
 
-        database.trackFileUpload(user, filename, dest);
         if (receipt != null) {
             sendFrame("RECEIPT\n" + "receipt-id:" + receipt + "\n");
         }

@@ -61,9 +61,7 @@ void StompProtocol::handleJoin(const string& gameName, ConnectionHandler* handle
     string frame = "SUBSCRIBE\n"
                    "destination:/" + gameName + "\n"
                    "id:" + to_string(subId) + "\n"
-                   "receipt:" + to_string(receiptId) + "\n"
-                   "\n"
-                   "\0";
+                   "receipt:" + to_string(receiptId) + "\n\n\0";
     sendFrame(handler, frame);
 }
 
@@ -81,9 +79,7 @@ void StompProtocol::handleExit(const string& gameName, ConnectionHandler* handle
 
     string frame = "UNSUBSCRIBE\n"
                    "id:" + to_string(subId) + "\n"
-                   "receipt:" + to_string(receiptId) + "\n"
-                   "\n"
-                   "\0";
+                   "receipt:" + to_string(receiptId) + "\n\n\0";
     sendFrame(handler, frame);
 }
 
@@ -93,9 +89,7 @@ void StompProtocol::handleLogout(ConnectionHandler* handler) {
     pendingReceipts[receiptId] = "DISCONNECT";
 
     string frame = "DISCONNECT\n"
-                   "receipt:" + to_string(receiptId) + "\n"
-                   "\n"
-                   "\0";
+                   "receipt:" + to_string(receiptId) + "\n\n\0";
     sendFrame(handler, frame);
 }
 
@@ -108,21 +102,45 @@ void StompProtocol::handleReport(const string& file, ConnectionHandler* handler)
         return;
     }
 
-    std::sort(data.events.begin(), data.events.end(), [](const Event& a, const Event& b) {
-        return a.get_time() < b.get_time();
+    std::sort(data.events.begin(), data.events.end(), [](const Event& e1, const Event& e2) {
+        bool is_pre_ht_1 = false;
+        const auto& updates1 = e1.get_game_updates();
+        if (updates1.find("before halftime") != updates1.end()) {
+            if (updates1.at("before halftime") == "true") {
+                is_pre_ht_1 = true;
+            }
+        }
+
+        bool is_pre_ht_2 = false;
+        const auto& updates2 = e2.get_game_updates();
+        if (updates2.find("before halftime") != updates2.end()) {
+            if (updates2.at("before halftime") == "true") {
+                is_pre_ht_2 = true;
+            }
+        }
+
+        if (is_pre_ht_1 != is_pre_ht_2) {
+            return is_pre_ht_1; 
+        }
+        return e1.get_time() < e2.get_time();
     });
 
     string gameName = data.team_a_name + "_" + data.team_b_name;
+    bool firstSend = true;
     for (Event& event : data.events) 
     {
         string body = buildEventBody(event, this->username, gameName);
-        string frame = "SEND\n"
-                       "destination:/" + gameName + "\n"
-                       "filename:" + file + "\n"
-                       "\n" + 
-                       body + "\n"
-                       "\0";
+        string frame = "";
+        if (firstSend)
+            frame = "SEND\n"
+                        "destination:/" + gameName + "\n"
+                        "filename:" + file + "\n\n" + body + "\n\0";
+        else
+            frame = "SEND\n"
+                        "destination:/" + gameName + "\n"
+                        "\n" + body + "\n\0";
         sendFrame(handler, frame);
+        firstSend = false;
     }
 }
 
@@ -130,15 +148,35 @@ void StompProtocol::saveEvent(string gameName, string user, Event& event) {
     std::lock_guard<std::mutex> lock(mutex);
     GameStats& stats = gameUpdates[gameName][user];
     stats.events.push_back(event);
-    std::sort(stats.events.begin(), stats.events.end(), [](const Event& a, const Event& b) {
-        return a.get_time() < b.get_time();
+
+    std::sort(stats.events.begin(), stats.events.end(), [](const Event& e1, const Event& e2) {
+        bool is_pre_ht_1 = false;
+        const auto& updates1 = e1.get_game_updates();
+        if (updates1.find("before halftime") != updates1.end()) {
+            if (updates1.at("before halftime") == "true") {
+                is_pre_ht_1 = true;
+            }
+        }
+
+        bool is_pre_ht_2 = false;
+        const auto& updates2 = e2.get_game_updates();
+        if (updates2.find("before halftime") != updates2.end()) {
+            if (updates2.at("before halftime") == "true") {
+                is_pre_ht_2 = true;
+            }
+        }
+
+        if (is_pre_ht_1 != is_pre_ht_2) {
+            return is_pre_ht_1; 
+        }
+        return e1.get_time() < e2.get_time();
     });
 
-    for (auto const& pair : event.get_game_updates()) 
+    for (auto& pair : event.get_game_updates()) 
         stats.generalStats[pair.first] = pair.second;
-    for (auto const& pair : event.get_team_a_updates()) 
+    for (auto& pair : event.get_team_a_updates()) 
         stats.teamAStats[pair.first] = pair.second;
-    for (auto const& pair : event.get_team_b_updates()) 
+    for (auto& pair : event.get_team_b_updates()) 
         stats.teamBStats[pair.first] = pair.second;
 }
 
@@ -149,19 +187,15 @@ string StompProtocol::buildEventBody(const Event& event, string user, string gam
     ss << "team b: " << event.get_team_b_name() << "\n";
     ss << "event name: " << event.get_name() << "\n";
     ss << "time: " << event.get_time() << "\n";
-    
     ss << "general game updates:\n";
-    for (auto const& pair : event.get_game_updates()) 
+    for (auto& pair : event.get_game_updates()) 
         ss << "\t" << pair.first << ":" << pair.second << "\n";
-
     ss << "team a updates:\n";
-    for (auto const& pair : event.get_team_a_updates()) 
+    for (auto& pair : event.get_team_a_updates()) 
         ss << "\t" << pair.first << ":" << pair.second << "\n";
-
     ss << "team b updates:\n";
-    for (auto const& pair : event.get_team_b_updates())
+    for (auto& pair : event.get_team_b_updates())
         ss << "\t" << pair.first << ":" << pair.second << "\n";
-
     ss << "description:\n" << event.get_description() << "\n";  
     return ss.str();
 }
@@ -174,40 +208,40 @@ void StompProtocol::handleSummary(const string& gameName, const string& user, co
         return;
     }
 
-    const GameStats& stats = gameUpdates[gameName][user];   
-    std::ofstream outfile(file);
-    if (!outfile.is_open()) {
+    GameStats& gs = gameUpdates[gameName][user];
+    std::ofstream f(file);
+    if (!f) {
         cout << "Error: Could not open file " << file << endl;
         return;
     }
 
-    string teamA = "Team A"; 
-    string teamB = "Team B"; 
-    if (!stats.events.empty()) {
-        teamA = stats.events[0].get_team_a_name();
-        teamB = stats.events[0].get_team_b_name();
+    string tA = "Team A";
+    string tB = "Team B";
+    if (gs.events.size() > 0) {
+        tA = gs.events[0].get_team_a_name();
+        tB = gs.events[0].get_team_b_name();
     }
-    
-    outfile << teamA << " vs " << teamB << "\n";
-    outfile << "Game stats:\n";
-    outfile << "General stats:\n";
-    for (auto const& pair : stats.generalStats) 
-        outfile << pair.first << ": " << pair.second << "\n";
 
-    outfile << teamA << " stats:\n";
-    for (auto const& pair : stats.teamAStats) 
-        outfile << pair.first << ": " << pair.second << "\n";
-    
-    outfile << teamB << " stats:\n";
-    for (auto const& pair : stats.teamBStats) 
-        outfile << pair.first << ": " << pair.second << "\n";
-        
-    outfile << "Game event reports:\n";
-    for (const Event& e : stats.events) {
-        outfile << e.get_time() << " - " << e.get_name() << ":\n\n";
-        outfile << e.get_description() << "\n\n";
+    f << tA << " vs " << tB << "\n";
+    f << "Game stats:\n";
+    f << "General stats:\n";
+    for (auto& p : gs.generalStats) {
+        f << p.first << ": " << p.second << "\n";
     }
-    outfile.close();
+    f << tA << " stats:\n";
+    for (auto& p : gs.teamAStats) {
+        f << p.first << ": " << p.second << "\n";
+    }
+    f << tB << " stats:\n";
+    for (auto& p : gs.teamBStats) {
+        f << p.first << ": " << p.second << "\n";
+    }
+    f << "Game event reports:\n";
+    for (int i = 0; i < gs.events.size(); i++) {
+        f << gs.events[i].get_time() << " - " << gs.events[i].get_name() << ":\n\n";
+        f << gs.events[i].get_description() << "\n\n";
+    }
+    f.close();
 }
 
 // Server Frame Processing
@@ -327,99 +361,96 @@ void StompProtocol::handleServerError(const vector<string>& lines) {
 }
 
 void StompProtocol::handleServerMessage(const vector<string>& lines) {
-    string gameName = "";
-    bool readingBody = false;
+    string game_name = "";
+    bool in_body = false;
 
     // Needed parameters for event
-    string user = "";
-    string teamA = "";
-    string teamB = "";
-    string eventName = "";
-    int time = 0;
-    string description = "";
-    std::map<string, string> generalUpdates;
-    std::map<string, string> teamAUpdates;
-    std::map<string, string> teamBUpdates;
+    string user_name = "";
+    string team_a_name = "";
+    string team_b_name = "";
+    string event_name = "";
+    int time_point = 0;
+    string desc = "";
+    std::map<string, string> gen_updates;
+    std::map<string, string> team_a_updates;
+    std::map<string, string> team_b_updates;
     
-    string currentSection = "";
-    for (const string& rawLine : lines) {
-        if (!readingBody && trim(rawLine).empty()) {
-            readingBody = true;
+    string section = "";
+    for (const string& raw : lines) {
+        if (!in_body && trim(raw).empty()) {
+            in_body = true;
             continue;
         }
 
-        if (!readingBody) {
-            // Header parse
-            string line = trim(rawLine);
-            if (line.find("destination:") == 0) {
-                gameName = trim(line.substr(12));
-                if (!gameName.empty() && gameName[0] == '/') {
-                    gameName = gameName.substr(1);
+        if (!in_body) {
+            string h = trim(raw);
+            if (h.find("destination:") == 0) {
+                game_name = trim(h.substr(12));
+                if (!game_name.empty() && game_name[0] == '/') {
+                    game_name = game_name.substr(1);
                 }
             }
         } 
         else {
-            // Body parse
-            string line = rawLine;
-            if (!line.empty() && line.back() == '\0') line.pop_back();
-            string trimmed = trim(line);
+            string line_content = raw;
+            if (!line_content.empty() && line_content.back() == '\0') line_content.pop_back();
+            string trimmed_line = trim(line_content);
 
-            // Detect Sections
-            if (trimmed == "general game updates:") { 
-                currentSection = "general"; 
+            if (trimmed_line == "general game updates:") { 
+                section = "general"; 
                 continue; 
             }
-            else if (trimmed == "team a updates:") { 
-                currentSection = "teamA"; 
+            else if (trimmed_line == "team a updates:") { 
+                section = "teamA"; 
                 continue; 
             }
-            else if (trimmed == "team b updates:") { 
-                currentSection = "teamB"; 
+            else if (trimmed_line == "team b updates:") { 
+                section = "teamB"; 
                 continue; 
             }
-            else if (trimmed == "description:") { 
-                currentSection = "description"; 
+            else if (trimmed_line == "description:") { 
+                section = "description"; 
                 continue; 
             }
 
-            // Parse content based on current section
-            if (currentSection == "") {
-                // We are in the standard fields (user, time, event name, etc.)
-                size_t colon = line.find(':');
-                if (colon != string::npos) {
-                    string key = trim(line.substr(0, colon));
-                    string val = trim(line.substr(colon + 1));
+            // Parse content of current section
+            if (section == "") {
+                // Update fields user, time, event name, team a, team b
+                int split_idx = line_content.find(':');
+                if (split_idx != string::npos) {
+                    string key_part = trim(line_content.substr(0, split_idx));
+                    string val_part = trim(line_content.substr(split_idx + 1));
 
-                    if (key == "user") user = val;
-                    else if (key == "team a") teamA = val;
-                    else if (key == "team b") teamB = val;
-                    else if (key == "event name") eventName = val;
-                    else if (key == "time") time = std::stoi(val);
+                    if (key_part == "user") user_name = val_part;
+                    else if (key_part == "team a") team_a_name = val_part;
+                    else if (key_part == "team b") team_b_name = val_part;
+                    else if (key_part == "event name") event_name = val_part;
+                    else if (key_part == "time") time_point = std::stoi(val_part);
                 }
             }
-            else if (currentSection == "description") {
-                description += line + "\n";
+            else if (section == "description") {
+                desc += line_content + "\n";
             }
             else {
-                // We are in one of the update maps (general/teamA/teamB)
-                size_t colon = line.find(':');
-                if (colon != string::npos) {
-                    string key = trim(line.substr(0, colon));
-                    string val = trim(line.substr(colon + 1));
+                // Update maps of general/teamA/teamB
+                size_t split_idx = line_content.find(':');
+                if (split_idx != string::npos) {
+                    string key_part = trim(line_content.substr(0, split_idx));
+                    string val_part = trim(line_content.substr(split_idx + 1));
 
-                    if (currentSection == "general") generalUpdates[key] = val;
-                    else if (currentSection == "teamA") teamAUpdates[key] = val;
-                    else if (currentSection == "teamB") teamBUpdates[key] = val;
+                    if (section == "general") gen_updates[key_part] = val_part;
+                    else if (section == "teamA") team_a_updates[key_part] = val_part;
+                    else if (section == "teamB") team_b_updates[key_part] = val_part;
                 }
             }
         }
     }
 
-    if (!user.empty() && !gameName.empty()) {
-        Event event(teamA, teamB, eventName, time, 
-                    generalUpdates, teamAUpdates, teamBUpdates, 
-                    description);    
-        saveEvent(gameName, user, event);
-        cout << "Received update for " << gameName << " from " << user << endl;
+    if (!user_name.empty() && !game_name.empty()) {
+        Event event(team_a_name, team_b_name, event_name, time_point, 
+                    gen_updates, team_a_updates, team_b_updates, 
+                    desc);    
+        saveEvent(game_name, user_name, event);
+        cout << "Received update for " << game_name << " from " << user_name << endl;
     }
 }
