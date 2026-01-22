@@ -2,7 +2,8 @@
 #include <regex.h>
 
 StompProtocol::StompProtocol() : 
-    subIdCounter(0), receiptIdCounter(0), shouldTerminate(false) {}
+    username(""), subIdCounter(0), receiptIdCounter(0), shouldTerminate(false), mutex(), 
+    subscriptions(), pendingReceipts(), gameUpdates() {}
 
 void StompProtocol::setUsername(string username) {
     this->username = username;
@@ -237,7 +238,7 @@ void StompProtocol::handleSummary(const string& gameName, const string& user, co
         f << p.first << ": " << p.second << "\n";
     }
     f << "Game event reports:\n";
-    for (int i = 0; i < gs.events.size(); i++) {
+    for (size_t i = 0; i < gs.events.size(); i++) {
         f << gs.events[i].get_time() << " - " << gs.events[i].get_name() << ":\n\n";
         f << gs.events[i].get_description() << "\n\n";
     }
@@ -253,6 +254,7 @@ bool StompProtocol::processServerFrame(const string& frame) {
     string command = trim(result[0]);
     if (command.length() == 0) return true;
 
+    std::cout << "Received frame from server:\n" << frame << std::endl;
     if (command == "CONNECTED") {
         result.erase(result.begin());
         handleServerConnected(result);
@@ -280,7 +282,7 @@ bool StompProtocol::processServerFrame(const string& frame) {
 string StompProtocol::trim(const string& str){
     int firstindex = 0;
     bool found = false;
-    for (int i = 0; i < str.length() && !found; i++)
+    for (size_t i = 0; i < str.length() && !found; i++)
     {
         if (str[i] != ' ' && str[i] != '\n' && str[i] != '\r' && str[i] != '\t'){
             firstindex = i;
@@ -291,7 +293,7 @@ string StompProtocol::trim(const string& str){
     string midstr(""); 
     midstr = str.substr(firstindex);
     int lastindex = str.length() - 1;
-    for (int i = str.length() - 1; i >= 0 && !found; i--)
+    for (size_t i = str.length() - 1; i >= 0 && !found; i--)
     {
         if (str[i] != ' ' && str[i] != '\n' && str[i] != '\r' && str[i] != '\t'){
             lastindex = i;
@@ -415,7 +417,7 @@ void StompProtocol::handleServerMessage(const vector<string>& lines) {
             // Parse content of current section
             if (section == "") {
                 // Update fields user, time, event name, team a, team b
-                int split_idx = line_content.find(':');
+                size_t split_idx = line_content.find(':');
                 if (split_idx != string::npos) {
                     string key_part = trim(line_content.substr(0, split_idx));
                     string val_part = trim(line_content.substr(split_idx + 1));

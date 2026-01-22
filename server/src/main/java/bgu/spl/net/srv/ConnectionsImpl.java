@@ -26,6 +26,7 @@ public class ConnectionsImpl<T> implements Connections<T> {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public void send(String channel, T msg) {
         ConcurrentHashMap<Integer, String> subscribers = channels.get(channel);
         if (subscribers != null) {

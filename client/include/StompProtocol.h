@@ -40,6 +40,8 @@ private:
         map<string, string> teamAStats;
         map<string, string> teamBStats;
         vector<Event> events;
+
+        GameStats() : generalStats(), teamAStats(), teamBStats(), events() {}
     };
     map<string, map<string, GameStats>> gameUpdates; 
 

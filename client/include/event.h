@@ -44,6 +44,10 @@ struct names_and_events {
     std::string team_a_name;
     std::string team_b_name;
     std::vector<Event> events;
+
+    names_and_events() : team_a_name(""), team_b_name(""), events() {}
+    names_and_events(std::string team_a, std::string team_b, std::vector<Event> events_list)
+        : team_a_name(team_a), team_b_name(team_b), events(events_list) {}
 };
 
 // function that parses the json file and returns a names_and_events object
